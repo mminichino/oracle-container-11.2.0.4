@@ -1,5 +1,6 @@
 #!/bin/sh
 #
+CONFIG_DIR=""
 
 err_end () {
   echo "Error: $1"
@@ -10,6 +11,24 @@ err_end () {
   }
   exit 1
 }
+
+while getopts "d:" opt
+do
+  case $opt in
+    s)
+      export ORACLE_SID=$OPTARG
+      ;;
+    d)
+      CONFIG_DIR=$OPTARG
+      ;;
+    \?)
+      err_end "Usage: $0 [ -s ORACLE_SID | -d /config/dir ]"
+      ;;
+  esac
+done
+
+ORAENV_ASK=NO
+source oraenv
 
 # Make sure the environment is properly set
 if [ -z "$ORACLE_SID" -o -z "$ORACLE_HOME" ]
@@ -180,25 +199,32 @@ else
    echo "PFILE found at $ORACLE_HOME/dbs/init${ORACLE_SID}.ora"
 fi
 
-# Create config directory
-if [ -d "$dbfmountpoint/dbconfig" ]; then
-   echo "DB config directory exists; backing up current directory"
-   mv $dbfmountpoint/dbconfig $dbfmountpoint/dbconfig.$$ || err_end "Can not backup up existing config directory."
+if [ -n "$CONFIG_DIR" ]; then
+   configDirLoc=$CONFIG_DIR
+else
+   configDirLoc=$dbfmountpoint
 fi
 
-mkdir $dbfmountpoint/dbconfig || err_end "Can not create config directory."
+# Create config directory
+if [ -d "$configDirLoc/dbconfig" ]; then
+   [ ! -w "$configDirLoc/dbconfig" ] && err_end "Can not write to config directory $configDirLoc/dbconfig"
+   echo "DB config directory exists; overwriting..."
+else
+   echo "DB config directory does not exist; creating ..."
+   mkdir $configDirLoc/dbconfig || err_end "Can not create config directory."
+fi
 
 # Copy files to config directory
-cp $tempfile $dbfmountpoint/dbconfig/${ORACLE_SID}.dbconfig
+cp $tempfile $configDirLoc/dbconfig/${ORACLE_SID}.dbconfig
 
-cp $ORACLE_HOME/network/admin/listener.ora $dbfmountpoint/dbconfig/
-cp $ORACLE_HOME/network/admin/sqlnet.ora $dbfmountpoint/dbconfig/
-cp $ORACLE_HOME/network/admin/tnsnames.ora $dbfmountpoint/dbconfig/
-[ -f $ORACLE_HOME/dbs/orapw${ORACLE_SID} ] && cp $ORACLE_HOME/dbs/orapw${ORACLE_SID} $dbfmountpoint/dbconfig/
-[ -f $ORACLE_HOME/dbs/init${ORACLE_SID}.ora ] && cp $ORACLE_HOME/dbs/init${ORACLE_SID}.ora $dbfmountpoint/dbconfig/
-[ -f $ORACLE_HOME/dbs/spfile${ORACLE_SID}.ora ] && cp $ORACLE_HOME/dbs/spfile${ORACLE_SID}.ora $dbfmountpoint/dbconfig/
+cp $ORACLE_HOME/network/admin/listener.ora $configDirLoc/dbconfig/
+cp $ORACLE_HOME/network/admin/sqlnet.ora $configDirLoc/dbconfig/
+cp $ORACLE_HOME/network/admin/tnsnames.ora $configDirLoc/dbconfig/
+[ -f $ORACLE_HOME/dbs/orapw${ORACLE_SID} ] && cp $ORACLE_HOME/dbs/orapw${ORACLE_SID} $configDirLoc/dbconfig/
+[ -f $ORACLE_HOME/dbs/init${ORACLE_SID}.ora ] && cp $ORACLE_HOME/dbs/init${ORACLE_SID}.ora $configDirLoc/dbconfig/
+[ -f $ORACLE_HOME/dbs/spfile${ORACLE_SID}.ora ] && cp $ORACLE_HOME/dbs/spfile${ORACLE_SID}.ora $configDirLoc/dbconfig/
 
-echo "DB ${ORACLE_SID} configuration file: $dbfmountpoint/dbconfig/${ORACLE_SID}.dbconfig"
+echo "DB ${ORACLE_SID} configuration file: $configDirLoc/dbconfig/${ORACLE_SID}.dbconfig"
 
-cat $dbfmountpoint/dbconfig/${ORACLE_SID}.dbconfig
+cat $configDirLoc/dbconfig/${ORACLE_SID}.dbconfig
 rm $tempfile

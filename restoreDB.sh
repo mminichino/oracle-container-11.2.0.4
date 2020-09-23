@@ -17,25 +17,32 @@ do
   esac
 done
 
+# Check whether ORACLE_SID is defined
+export ORACLE_SID=${ORACLE_SID:-oradb}
+
 sudo -n chown -R oracle:dba /opt/oracle/oradata || {
    echo "Can not set ownership on oradata mount."
    exit 1
 }
 
+if [ -d /opt/oracle/archivelog ]; then
 sudo -n chown -R oracle:dba /opt/oracle/archivelog || {
    echo "Can not set ownership on archivelog mount."
    exit 1
 }
+fi
 
-if [ ! -d /opt/oracle/oradata/dbconfig ]; then
+if [ ! -d /opt/oracle/oradata/dbconfig -a ! -d /opt/oracle/oradata/$ORACLE_SID/dbconfig ]; then
    echo "Can not find DB configuration directory /opt/oracle/oradata/dbconfig."
    exit 1
 fi
 
 if [ -f /opt/oracle/oradata/dbconfig/*.dbconfig ]; then
    . /opt/oracle/oradata/dbconfig/*.dbconfig
+elif [ -f /opt/oracle/oradata/$ORACLE_SID/dbconfig/*.dbconfig ]; then
+   . /opt/oracle/oradata/$ORACLE_SID/dbconfig/*.dbconfig
 else
-   echo "Can not find dbconfig file in directory /opt/oracle/oradata/dbconfig."
+   echo "Can not find dbconfig file in /opt/oracle/oradata/dbconfig or /opt/oracle/oradata/$ORACLE_SID/dbconfig."
    exit 1
 fi
 
@@ -45,9 +52,6 @@ if [ -z "$ORACLE_HOME" -o -z "$ORACLE_BASE" -o -z "$REDOGROUPS" -o -z "$REDOPERG
 fi
 
 echo "[i] Restoring database as SID $ORACLE_SID"
-
-# Check whether ORACLE_SID is defined
-export ORACLE_SID=${ORACLE_SID:-oradb}
 
 # Auto generate ORACLE PWD if not defined
 export ORACLE_PWD=${ORACLE_PWD:-"`openssl rand -base64 8`1"}
@@ -90,7 +94,10 @@ else
    echo "Done."
 fi
 
-# Create database PFILE
+if [ "$BKUPCOPY" -ne 1 ]; then
+# Hot backup snapshot restore
+
+# Modify database PFILE
 echo "Creating PFILE for $ORACLE_SID"
 sed -e 's/^[a-zA-Z0-9*]*\.//' \
     -e '/audit_file_dest/d' \
@@ -159,7 +166,40 @@ cat <<EOF >> $ORACLE_HOME/dbs/init${ORACLE_SID}.ora
 log_archive_dest_1='LOCATION=/opt/oracle/archivelog'
 EOF
 
-fi
+fi # Archive mode
+
+else # Backup copy snapshot
+
+dataFileArray=($(echo $DATAFILES | sed "s/,/ /g"))
+dataFileArrayCount=${#dataFileArray[@]}
+hotBackupScn=0
+
+# Create new PFILE
+cat <<EOF > $ORACLE_HOME/dbs/init${ORACLE_SID}.ora
+db_name='$ORACLE_SID'
+memory_target=2G
+processes = 1000
+db_block_size=8192
+db_domain=''
+db_recovery_file_dest='/opt/oracle/oradata/$ORACLE_SID/flash_recovery_area'
+db_recovery_file_dest_size=2G
+diagnostic_dest='$ORACLE_BASE'
+dispatchers='(PROTOCOL=TCP) (SERVICE=${ORACLE_SID}XDB)'
+open_cursors=5000
+remote_login_passwordfile='EXCLUSIVE'
+control_files = ('/opt/oracle/oradata/$ORACLE_SID/control02.ctl', '/opt/oracle/oradata/$ORACLE_SID/control03.ctl')
+audit_file_dest='$ORACLE_BASE/admin/$ORACLE_SID/adump'
+db_create_file_dest='/opt/oracle/oradata/$ORACLE_SID'
+log_archive_dest_1='LOCATION=/opt/oracle/oradata/$ORACLE_SID/archivelog'
+compatible ='$DBVERSION'
+EOF
+
+[ ! -d "/opt/oracle/oradata/$ORACLE_SID/flash_recovery_area" ] && mkdir /opt/oracle/oradata/$ORACLE_SID/flash_recovery_area
+[ ! -d "$ORACLE_BASE/admin/$ORACLE_SID/adump" ] && mkdir -p $ORACLE_BASE/admin/$ORACLE_SID/adump
+[ ! -d "$ORACLE_BASE/admin/$ORACLE_SID/dpdump" ] && mkdir -p $ORACLE_BASE/admin/$ORACLE_SID/dpdump
+[ ! -d "/opt/oracle/oradata/$ORACLE_SID/archivelog" ] && mkdir /opt/oracle/oradata/$ORACLE_SID/archivelog
+
+fi # Backup type
 
 SQL_SCRIPT=$(mktemp)
 
@@ -234,16 +274,22 @@ echo "Import SQL Script: $SQL_SCRIPT"
 
 fi
 
-# If DB is hot backup clone recover is required prior to open
-if [ -n "$ARCHIVELOGMODE" -a "$ARCHIVELOGMODE" = "true" ]; then
+# If DB is hot backup or image clone recover is required prior to open
+if [ "$ARCHIVELOGMODE" = "true" -o "$BKUPCOPY" -eq 1 ]; then
 
 RMAN_SCRIPT_CATALOG=$(mktemp)
 RMAN_SCRIPT_RECOVER=$(mktemp)
 
+if [ "$BKUPCOPY" -eq 1 ]; then
+   ARCH_LOG_LOCATION=/opt/oracle/oradata/${ORACLE_SID}/archivelog
+else
+   ARCH_LOG_LOCATION=/opt/oracle/archivelog
+fi
+
 cat <<EOF > $RMAN_SCRIPT_CATALOG
 run
 {
-catalog start with '/opt/oracle/archivelog' noprompt;
+catalog start with '$ARCH_LOG_LOCATION' noprompt;
 }
 EOF
 
