@@ -12,7 +12,7 @@ err_end () {
   exit 1
 }
 
-while getopts "d:" opt
+while getopts "s:d:" opt
 do
   case $opt in
     s)
@@ -53,6 +53,7 @@ fi
 tempfile=$(mktemp)
 
 # Get list of datafiles
+if [ -z "$CONFIG_DIR" ]; then
 datafiles=`sqlplus -S / as sysdba << EOF
    set heading off;
    set pagesize 0;
@@ -60,6 +61,9 @@ datafiles=`sqlplus -S / as sysdba << EOF
    select name from v\\$datafile ;
    exit;
 EOF`
+else
+datafiles=$(ls $CONFIG_DIR/data* 2>/dev/null)
+fi
 ret=$?
 
 # Write datafile config to file
@@ -188,6 +192,16 @@ dbcharset=`sqlplus -S / as sysdba << EOF
 EOF`
 
 echo "DBCHARSET=$dbcharset" >> $tempfile
+
+dbversion=`sqlplus -S / as sysdba << EOF
+   set heading off;
+   set pagesize 0;
+   set feedback off;
+   select version from v\\$instance ;
+   exit;
+EOF`
+
+echo "DBVERSION=$dbversion" >> $tempfile
 
 # Create PFILE if not present
 if [ ! -f $ORACLE_HOME/dbs/init${ORACLE_SID}.ora ]; then
