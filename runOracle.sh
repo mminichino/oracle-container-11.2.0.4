@@ -148,7 +148,7 @@ fi;
 export ORACLE_CHARACTERSET=${ORACLE_CHARACTERSET:-AL32UTF8}
 
 # Check whether database already exists
-if [ -d $ORACLE_BASE/oradata/$ORACLE_SID ]; then
+if [ -d $ORACLE_BASE/oradata/$ORACLE_SID -o -d $ORACLE_BASE/oradata/dbconfig ]; then
 
       if [ "$IMPORT_DB" -eq 0 -o "$(grep ^$ORACLE_SID /etc/oratab | cut -d: -f1)" = "$ORACLE_SID" ];then
 

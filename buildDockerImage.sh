@@ -1,12 +1,35 @@
 #!/bin/sh
+VERSION=11.2.0.4
+IMAGE_NAME="oracle/database:${VERSION}-ee"
+DOCKERFILE="Dockerfile"
+
+function err_exit {
+   if [ -n "$1" ]; then
+      echo "$1"
+   else
+      echo "Usage: $0 -s ORACLE_SID -d /backup/dir [ -t backup_tag | -n ]"
+   fi
+   exit 1
+}
 
 # ################## #
 # BUILDING THE IMAGE #
 # ################## #
 
-VERSION=11.2.0.4
-IMAGE_NAME="oracle/database:11.2.0.4-ee"
-DOCKERFILE="Dockerfile"
+while getopts "v:" opt
+do
+  case $opt in
+    v)
+      VERSION=$OPTARG
+      IMAGE_NAME="oracle/database:${VERSION}-ee"
+      DOCKERFILE="Dockerfile.${VERSION}"
+      ;;
+    \?)
+      err_exit
+      ;;
+  esac
+done
+
 echo "Building image '$IMAGE_NAME' ..."
 
 # BUILD THE IMAGE (replace all environment variables)

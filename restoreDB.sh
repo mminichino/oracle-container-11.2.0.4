@@ -3,6 +3,7 @@
 DATE=$(date '+%m%d%y-%H%M%S')
 LOGFILE=/opt/oracle/restore-${DATE}.log
 MANUAL=0
+BKUPCOPY=${BKUPCOPY:-0}
 
 while getopts "m" opt
 do
@@ -32,17 +33,22 @@ sudo -n chown -R oracle:dba /opt/oracle/archivelog || {
 }
 fi
 
-if [ ! -d /opt/oracle/oradata/dbconfig -a ! -d /opt/oracle/oradata/$ORACLE_SID/dbconfig ]; then
-   echo "Can not find DB configuration directory /opt/oracle/oradata/dbconfig."
+if [ ! -d /opt/oracle/oradata/dbconfig -a ! -d /opt/oracle/oradata/$ORACLE_SID/dbconfig -a ! /opt/oracle/archivelog/dbconfig ]; then
+   echo "Can not find DB configuration directory."
    exit 1
 fi
 
 if [ -f /opt/oracle/oradata/dbconfig/*.dbconfig ]; then
+   echo "Sourcing configuration $(ls /opt/oracle/oradata/dbconfig/*.dbconfig)"
    . /opt/oracle/oradata/dbconfig/*.dbconfig
 elif [ -f /opt/oracle/oradata/$ORACLE_SID/dbconfig/*.dbconfig ]; then
+   echo "Sourcing configuration $(ls /opt/oracle/oradata/$ORACLE_SID/dbconfig/*.dbconfig)"
    . /opt/oracle/oradata/$ORACLE_SID/dbconfig/*.dbconfig
+elif [ -f /opt/oracle/archivelog/dbconfig/*.dbconfig ]; then
+   echo "Sourcing configuratiopn $(ls /opt/oracle/archivelog/dbconfig/*.dbconfig)"
+   . /opt/oracle/archivelog/dbconfig/*.dbconfig
 else
-   echo "Can not find dbconfig file in /opt/oracle/oradata/dbconfig or /opt/oracle/oradata/$ORACLE_SID/dbconfig."
+   echo "Can not find dbconfig file in /opt/oracle/oradata/dbconfig or /opt/oracle/oradata/$ORACLE_SID/dbconfig or /opt/oracle/archivelog/dbconfig."
    exit 1
 fi
 
@@ -56,6 +62,15 @@ echo "[i] Restoring database as SID $ORACLE_SID"
 # Auto generate ORACLE PWD if not defined
 export ORACLE_PWD=${ORACLE_PWD:-"`openssl rand -base64 8`1"}
 echo "Oracle password for sys and system: $ORACLE_PWD"
+
+dbMajorRev=$(echo $DBVERSION | sed -n -e 's/^\([0-9]*\)\..*$/\1/p')
+
+if [ "$dbMajorRev" -lt 11 ]; then
+   echo "DB Version $dbMajorRev not supported."
+   exit 1
+fi
+
+echo "Performing DB restore for version $dbMajorRev"
 
 # Create network related config files (sqlnet.ora, tnsnames.ora, listener.ora)
 mkdir -p $ORACLE_HOME/network/admin
@@ -84,6 +99,13 @@ echo "$ORACLE_SID=
     )
   )" > $ORACLE_HOME/network/admin/tnsnames.ora
 
+# Check if the listener is running and stop if it is
+lsnrctl status >/dev/null 2>&1
+if [ $? -eq 0 ]; then
+   echo "Listener running, stopping ..."
+   lsnrctl stop
+fi
+
 echo -n "Starting the Listener ..."
 lsnrctl start >> $LOGFILE 2>&1
 
@@ -97,9 +119,19 @@ fi
 if [ "$BKUPCOPY" -ne 1 ]; then
 # Hot backup snapshot restore
 
+if [ -f /opt/oracle/oradata/dbconfig/init${ORIG_ORACLE_SID}.ora ]; then
+   backupInitFile=/opt/oracle/oradata/dbconfig/init${ORIG_ORACLE_SID}.ora
+elif [ -f /opt/oracle/archivelog/dbconfig/init${ORIG_ORACLE_SID}.ora ]; then
+   backupInitFile=/opt/oracle/archivelog/dbconfig/init${ORIG_ORACLE_SID}.ora
+else
+   echo "Can not find instance ${ORIG_ORACLE_SID} PFILE."
+   exit 1
+fi
+
 # Modify database PFILE
 echo "Creating PFILE for $ORACLE_SID"
 sed -e 's/^[a-zA-Z0-9*]*\.//' \
+    -e '/db_name/d' \
     -e '/audit_file_dest/d' \
     -e '/control_files/d' \
     -e '/diagnostic_dest/d' \
@@ -107,11 +139,18 @@ sed -e 's/^[a-zA-Z0-9*]*\.//' \
     -e '/log_archive_dest_/d' \
     -e '/remote_login_passwordfile/d' \
     -e '/db_recovery_file_dest_size/d' \
-    -e '/db_create_file_dest/d' /opt/oracle/oradata/dbconfig/init${ORACLE_SID}.ora > $ORACLE_HOME/dbs/init${ORACLE_SID}.ora
+    -e '/db_create_file_dest/d' $backupInitFile > $ORACLE_HOME/dbs/init${ORACLE_SID}.ora
 
 # Create and prep directory structure
 echo "Creating directory structure"
-[ ! -d /opt/oracle/oradata/$ORACLE_SID ] && mkdir /opt/oracle/oradata/$ORACLE_SID
+if [ ! -d /opt/oracle/oradata/$ORACLE_SID ]; then
+   if [ -d /opt/oracle/oradata/$ORIG_ORACLE_SID ]; then
+      mv /opt/oracle/oradata/$ORIG_ORACLE_SID /opt/oracle/oradata/$ORACLE_SID
+   else
+      echo "Can not locate dbf root directory, neither /opt/oracle/oradata/$ORACLE_SID nor /opt/oracle/oradata/$ORIG_ORACLE_SID found."
+      exit 1
+   fi
+fi
 [ ! -d /opt/oracle/oradata/$ORACLE_SID/backup ] && mkdir /opt/oracle/oradata/$ORACLE_SID/backup
 [ ! -d /opt/oracle/oradata/$ORACLE_SID/flash_recovery_area ] && mkdir /opt/oracle/oradata/$ORACLE_SID/flash_recovery_area
 [ ! -d /opt/oracle/admin/$ORACLE_SID/adump ] && mkdir -p /opt/oracle/admin/$ORACLE_SID/adump
@@ -136,16 +175,17 @@ else
    hotBackupScn=$(cat /opt/oracle/oradata/$mountFileRelativePath/${ORACLE_SID}.snap.scn)
 fi
 
-for dataFileName in "${dataFileArray[@]}"; do
-    dataFileBaseName=$(basename $dataFileName)
-    if [ ! -f /opt/oracle/oradata/${ORACLE_SID}/$dataFileBaseName ]; then
-       echo "Moving /opt/oracle/oradata/$mountFileRelativePath/$dataFileBaseName to /opt/oracle/oradata/${ORACLE_SID}/$dataFileBaseName"
-       mv /opt/oracle/oradata/$mountFileRelativePath/$dataFileBaseName /opt/oracle/oradata/${ORACLE_SID}/$dataFileBaseName
-    fi
-done
+#for dataFileName in "${dataFileArray[@]}"; do
+#    dataFileBaseName=$(basename $dataFileName)
+#    if [ ! -f /opt/oracle/oradata/${ORACLE_SID}/$dataFileBaseName ]; then
+#       echo "Moving /opt/oracle/oradata/$mountFileRelativePath/$dataFileBaseName to /opt/oracle/oradata/${ORACLE_SID}/$dataFileBaseName"
+#       mv /opt/oracle/oradata/$mountFileRelativePath/$dataFileBaseName /opt/oracle/oradata/${ORACLE_SID}/$dataFileBaseName
+#    fi
+#done
 
 # Add updated init parameters
 cat <<EOF >> $ORACLE_HOME/dbs/init${ORACLE_SID}.ora
+db_name='$ORACLE_SID'
 db_recovery_file_dest='/opt/oracle/oradata/$ORACLE_SID/flash_recovery_area'
 db_recovery_file_dest_size=2G
 diagnostic_dest='$ORACLE_BASE'
@@ -234,7 +274,11 @@ done
 count=1
 echo "DATAFILE"
 for dataFileName in "${dataFileArray[@]}"; do
-destDataFileName=$(basename $dataFileName)
+if [ "$BKUPCOPY" -ne 1 ]; then
+   destDataFileName=$(echo $dataFileName | sed -e "s#^$DATAFILEMOUNTPOINT/$ORIG_ORACLE_SID/##")
+else
+   destDataFileName=$(basename $dataFileName)
+fi
 if [ $count -ne $dataFileArrayCount ]; then
    echo "'/opt/oracle/oradata/${ORACLE_SID}/${destDataFileName}',"
 else
@@ -248,6 +292,8 @@ echo "CHARACTER SET ${DBCHARSET};"
 
 DATE=$(date '+%m%d%y-%H%M%S')
 echo "--> Begin DB import on $DATE <--" >> $LOGFILE
+
+if [ "$MANUAL" -eq 0 ];then
 
 # Run SQL script
 echo -n "Importing database ..."
@@ -267,12 +313,15 @@ else
    echo "Done."
 fi
 
-if [ "$MANUAL" -ne 0 ];then
+else
 
 # Manual recovery
 echo "Import SQL Script: $SQL_SCRIPT"
 
 fi
+
+if [ "$dbMajorRev" -eq 11 ]; then
+echo "Performing DB 11 style recover."
 
 # If DB is hot backup or image clone recover is required prior to open
 if [ "$ARCHIVELOGMODE" = "true" -o "$BKUPCOPY" -eq 1 ]; then
@@ -293,6 +342,8 @@ catalog start with '$ARCH_LOG_LOCATION' noprompt;
 }
 EOF
 
+if [ "$MANUAL" -eq 0 ];then
+
 echo -n "Cataloging archived logs ..."
 rman <<EOF >> $LOGFILE
 connect target /
@@ -306,6 +357,15 @@ else
    echo "Done."
 fi
 
+else
+
+# Manual mode
+echo "Skipping archive log catalog, script: $RMAN_SCRIPT_CATALOG"
+
+fi
+
+if [ "$MANUAL" -eq 0 ];then
+
 lastSeqNum=`sqlplus -S / as sysdba <<EOF
 set heading off;
 set pagesize 0;
@@ -318,6 +378,13 @@ if [ "$hotBackupScn" -ne 0 ]; then
    rmanRecoverOpt="until scn $hotBackupScn"
 else
    rmanRecoverOpt="until sequence $lastSeqNum"
+fi
+
+else
+
+# Manual recovery
+rmanRecoverOpt=""
+
 fi
 
 cat <<EOF > $RMAN_SCRIPT_RECOVER
@@ -353,8 +420,39 @@ echo "RMAN Recover Script: $RMAN_SCRIPT_RECOVER"
 
 fi # Manual or Auto
 
-
 fi # If hot backup
+
+else # DB major rev is 12 or higher
+echo "Using DB 12 and higher style recover."
+
+RECOVER_SQL_SCRIPT=$(mktemp)
+
+cat <<EOF >$RECOVER_SQL_SCRIPT
+recover database using backup controlfile until cancel;
+auto
+EOF
+
+if [ "$MANUAL" -eq 0 ];then
+# Recover database
+echo -n "Recovering database ..."
+sqlplus -S / as sysdba <<EOF >> $LOGFILE
+@$RECOVER_SQL_SCRIPT
+EOF
+
+if [ $? -ne 0 ]; then
+   echo "Failed. See log for details."
+   exit 1
+else
+   echo "Done."
+fi
+
+else # Manual recover
+
+echo "Database recover scriopt: $RECOVER_SQL_SCRIPT"
+
+fi # Auto or manual
+
+fi # DB version
 
 if [ "$MANUAL" -eq 0 ];then
 

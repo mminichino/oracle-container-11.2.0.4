@@ -4,7 +4,10 @@ OPTS="-d"
 CMD=""
 ORACLE_SID=oradb
 DATA_MOUNT=""
-ORACLE_PWD=""
+ORACLE_PWD="password"
+VERSION=11.2.0.4
+IMAGE_NAME="oracle/database:${VERSION}-ee"
+CONTAINER_NAME=""
 
 function err_exit {
     if [ -z "$1" ]; then
@@ -15,7 +18,7 @@ function err_exit {
     exit 1
 }
 
-while getopts "ms:d:p:" opt
+while getopts "ms:d:p:n:v:" opt
 do
   case $opt in
     m)
@@ -31,17 +34,28 @@ do
     p)
       ORACLE_PWD=$OPTARG
       ;;
+    n)
+      CONTAINER_NAME=$OPTARG
+      ;;
+    v)
+      VERSION=$OPTARG
+      IMAGE_NAME="oracle/database:${VERSION}-ee"
+      ;;
     \?)
       err_exit
       ;;
   esac
 done
 
+if [ -z "$CONTAINER_NAME" ]; then
+   CONTAINER_NAME=$ORACLE_SID
+fi
+
 [ -z "$DATA_MOUNT" -o -z "$ORACLE_SID" -o -z "$ORACLE_PWD" ] && err_exit
 [ ! -d "$DATA_MOUNT" ] && err_exit "$DATA_MOUNT does not exist."
 [ $(stat -c "%m" "$DATA_MOUNT") = "/" ] && err_exit "$DATA_MOUNT is not a mount point."
 
-docker run --privileged $OPTS --name oradb11 \
+docker run --privileged $OPTS --name $CONTAINER_NAME \
 	--shm-size=2192m \
 	-p 1521:1521 -p 5500:5500 \
 	-e ORACLE_SID=${ORACLE_SID} \
@@ -51,4 +65,4 @@ docker run --privileged $OPTS --name oradb11 \
 	-e IMPORT_DB=1 \
 	-e BKUPCOPY=1 \
 	-v ${DATA_MOUNT}:/opt/oracle/oradata/${ORACLE_SID} \
-	oracle/database:11.2.0.4-ee $CMD
+	$IMAGE_NAME $CMD

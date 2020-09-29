@@ -15,7 +15,12 @@
 set -e
 
 # Check whether ORACLE_SID is passed on
-export ORACLE_SID=${1:-ORCLCDB}
+export ORACLE_SID=${1:-oradb}
+
+# Check whether ORACLE_PDB is passed on
+export ORACLE_PDB=${ORACLE_PDB:-pdb_oradb}
+
+CREATE_PDB=${CREATE_PDB:-0}
 
 # Auto generate ORACLE PWD if not passed on
 export ORACLE_PWD=${2:-"`openssl rand -base64 8`1"}
@@ -25,6 +30,7 @@ echo "ORACLE PASSWORD FOR SYS AND SYSTEM: $ORACLE_PWD";
 cp $ORACLE_BASE/$CONFIG_RSP $ORACLE_BASE/dbca.rsp
 sed -i -e "s|###ORACLE_SID###|$ORACLE_SID|g" $ORACLE_BASE/dbca.rsp
 sed -i -e "s|###ORACLE_PWD###|$ORACLE_PWD|g" $ORACLE_BASE/dbca.rsp
+sed -i -e "s|###ORACLE_PDB###|$ORACLE_PDB|g" $ORACLE_BASE/dbca.rsp
 sed -i -e "s|###ORACLE_CHARACTERSET###|$ORACLE_CHARACTERSET|g" $ORACLE_BASE/dbca.rsp
 
 # If there is greater than 8 CPUs default back to dbca memory calculations
@@ -73,6 +79,15 @@ sqlplus / as sysdba << EOF
    ALTER SYSTEM SET control_files='$ORACLE_BASE/oradata/$ORACLE_SID/control01.ctl' scope=spfile;
    exit;
 EOF
+
+if [ "$CREATE_PDB" -eq 1 ];then
+echo -n "Set PDB to auto open ..."
+sqlplus / as sysdba << EOF
+   ALTER PLUGGABLE DATABASE $ORACLE_PDB SAVE STATE;
+   exit;
+EOF
+echo "Done."
+fi
 
 # Remove temporary response file
 rm $ORACLE_BASE/dbca.rsp
