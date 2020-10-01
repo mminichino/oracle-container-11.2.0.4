@@ -234,6 +234,12 @@ log_archive_dest_1='LOCATION=/opt/oracle/oradata/$ORACLE_SID/archivelog'
 compatible ='$DBVERSION'
 EOF
 
+if [ "$dbMajorRev" -gt 11 ]; then
+cat <<EOF >> $ORACLE_HOME/dbs/init${ORACLE_SID}.ora
+enable_pluggable_database=true
+EOF
+fi
+
 [ ! -d "/opt/oracle/oradata/$ORACLE_SID/flash_recovery_area" ] && mkdir /opt/oracle/oradata/$ORACLE_SID/flash_recovery_area
 [ ! -d "$ORACLE_BASE/admin/$ORACLE_SID/adump" ] && mkdir -p $ORACLE_BASE/admin/$ORACLE_SID/adump
 [ ! -d "$ORACLE_BASE/admin/$ORACLE_SID/dpdump" ] && mkdir -p $ORACLE_BASE/admin/$ORACLE_SID/dpdump
@@ -277,7 +283,7 @@ for dataFileName in "${dataFileArray[@]}"; do
 if [ "$BKUPCOPY" -ne 1 ]; then
    destDataFileName=$(echo $dataFileName | sed -e "s#^$DATAFILEMOUNTPOINT/$ORIG_ORACLE_SID/##")
 else
-   destDataFileName=$(basename $dataFileName)
+   destDataFileName=$(echo $dataFileName | sed -e "s#^$DATAFILEMOUNTPOINT/##")
 fi
 if [ $count -ne $dataFileArrayCount ]; then
    echo "'/opt/oracle/oradata/${ORACLE_SID}/${destDataFileName}',"
