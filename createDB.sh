@@ -61,7 +61,7 @@ DIAG_ADR_ENABLED = off
 
 # Start LISTENER and run DBCA
 lsnrctl start &&
-dbca -silent -responseFile $ORACLE_BASE/dbca.rsp ||
+dbca -silent -createDatabase -responseFile $ORACLE_BASE/dbca.rsp ||
  cat /opt/oracle/cfgtoollogs/dbca/$ORACLE_SID/$ORACLE_SID.log ||
  cat /opt/oracle/cfgtoollogs/dbca/$ORACLE_SID.log
 
