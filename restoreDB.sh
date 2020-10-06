@@ -4,12 +4,16 @@ DATE=$(date '+%m%d%y-%H%M%S')
 LOGFILE=/opt/oracle/restore-${DATE}.log
 MANUAL=0
 BKUPCOPY=${BKUPCOPY:-0}
+CREATE_AUX=0
 
-while getopts "m" opt
+while getopts "ma" opt
 do
   case $opt in
     m)
       MANUAL=1
+      ;;
+    a)
+      CREATE_AUX=1
       ;;
     \?)
       echo "Usage: $0 [ -m ]"
@@ -20,6 +24,7 @@ done
 
 # Check whether ORACLE_SID is defined
 export ORACLE_SID=${ORACLE_SID:-oradb}
+export AUX_SID=${AUX_SID:-auxdb}
 
 sudo -n chown -R oracle:dba /opt/oracle/oradata || {
    echo "Can not set ownership on oradata mount."
@@ -64,6 +69,7 @@ export ORACLE_PWD=${ORACLE_PWD:-"`openssl rand -base64 8`1"}
 echo "Oracle password for sys and system: $ORACLE_PWD"
 
 dbMajorRev=$(echo $DBVERSION | sed -n -e 's/^\([0-9]*\)\..*$/\1/p')
+dbMinorRev=$(echo $DBVERSION | sed -n -e 's/^[0-9]*\.\([0-9]*\)\..*$/\1/p')
 
 if [ "$dbMajorRev" -lt 11 ]; then
    echo "DB Version $dbMajorRev not supported."
@@ -139,6 +145,7 @@ sed -e 's/^[a-zA-Z0-9*]*\.//' \
     -e '/log_archive_dest_/d' \
     -e '/remote_login_passwordfile/d' \
     -e '/db_recovery_file_dest_size/d' \
+    -e '/local_listener/d' \
     -e '/db_create_file_dest/d' $backupInitFile > $ORACLE_HOME/dbs/init${ORACLE_SID}.ora
 
 # Create and prep directory structure
@@ -174,14 +181,6 @@ if [ ! -f "/opt/oracle/oradata/$mountFileRelativePath/${ORACLE_SID}.snap.scn" ];
 else
    hotBackupScn=$(cat /opt/oracle/oradata/$mountFileRelativePath/${ORACLE_SID}.snap.scn)
 fi
-
-#for dataFileName in "${dataFileArray[@]}"; do
-#    dataFileBaseName=$(basename $dataFileName)
-#    if [ ! -f /opt/oracle/oradata/${ORACLE_SID}/$dataFileBaseName ]; then
-#       echo "Moving /opt/oracle/oradata/$mountFileRelativePath/$dataFileBaseName to /opt/oracle/oradata/${ORACLE_SID}/$dataFileBaseName"
-#       mv /opt/oracle/oradata/$mountFileRelativePath/$dataFileBaseName /opt/oracle/oradata/${ORACLE_SID}/$dataFileBaseName
-#    fi
-#done
 
 # Add updated init parameters
 cat <<EOF >> $ORACLE_HOME/dbs/init${ORACLE_SID}.ora
@@ -237,6 +236,7 @@ EOF
 if [ "$dbMajorRev" -gt 11 ]; then
 cat <<EOF >> $ORACLE_HOME/dbs/init${ORACLE_SID}.ora
 enable_pluggable_database=true
+undo_tablespace='UNDOTBS1'
 EOF
 fi
 
@@ -246,6 +246,147 @@ fi
 [ ! -d "/opt/oracle/oradata/$ORACLE_SID/archivelog" ] && mkdir /opt/oracle/oradata/$ORACLE_SID/archivelog
 
 fi # Backup type
+
+######################################
+## Create Aux Instance If Requested ##
+######################################
+
+if [ "$CREATE_AUX" -eq 1 ]; then
+
+echo "Creating PFILE for aux instance $AUX_SID"
+sed -e 's/^[a-zA-Z0-9*]*\.//' \
+    -e '/db_name/d' \
+    -e '/audit_file_dest/d' \
+    -e '/control_files/d' \
+    -e '/diagnostic_dest/d' \
+    -e '/db_recovery_file_dest/d' \
+    -e '/log_archive_dest_/d' \
+    -e '/remote_login_passwordfile/d' \
+    -e '/db_recovery_file_dest_size/d' \
+    -e '/memory_target/d' \
+    -e '/db_create_file_dest/d' $ORACLE_HOME/dbs/init${ORACLE_SID}.ora > $ORACLE_HOME/dbs/init${AUX_SID}.ora
+
+# Add updated init parameters
+cat <<EOF >> $ORACLE_HOME/dbs/init${AUX_SID}.ora
+db_name='$AUX_SID'
+memory_target=960M
+db_recovery_file_dest='/opt/oracle/oradata/$AUX_SID/flash_recovery_area'
+db_recovery_file_dest_size=2G
+diagnostic_dest='$ORACLE_BASE'
+control_files = ('/opt/oracle/oradata/$AUX_SID/control01.ctl', '/opt/oracle/oradata/$AUX_SID/control02.ctl')
+audit_file_dest='/opt/oracle/admin/$AUX_SID/adump'
+db_create_file_dest='/opt/oracle/oradata/$AUX_SID'
+log_archive_dest_1='LOCATION=/opt/oracle/oradata/$AUX_SID/archivelog'
+undo_tablespace='UNDOTBS1'
+EOF
+
+[ ! -d "/opt/oracle/oradata/$AUX_SID" ] && mkdir /opt/oracle/oradata/$AUX_SID
+[ ! -d "/opt/oracle/oradata/$AUX_SID/flash_recovery_area" ] && mkdir /opt/oracle/oradata/$AUX_SID/flash_recovery_area
+[ ! -d "$ORACLE_BASE/admin/$AUX_SID/adump" ] && mkdir -p $ORACLE_BASE/admin/$AUX_SID/adump
+[ ! -d "$ORACLE_BASE/admin/$AUX_SID/dpdump" ] && mkdir -p $ORACLE_BASE/admin/$AUX_SID/dpdump
+[ ! -d "/opt/oracle/oradata/$AUX_SID/archivelog" ] && mkdir /opt/oracle/oradata/$AUX_SID/archivelog
+
+echo -n "Creating aux instance password file ..."
+orapwd file=$ORACLE_HOME/dbs/orapw${AUX_SID} password=${ORACLE_PWD} entries=30 >> $LOGFILE 2>&1
+
+if [ $? -ne 0 ]; then
+   echo "Failed. See log for details."
+   exit 1
+else
+   echo "Done."
+fi
+
+fi
+
+############################################
+## Specific Incremental Merge PDB Restore ##
+############################################
+
+if [ "$dbMajorRev" -ge 12 -a "$BKUPCOPY" -eq 1 -a -n "$PDB_NAMES" ]; then
+
+echo -n "Creating instance password file ..."
+orapwd file=$ORACLE_HOME/dbs/orapw${ORACLE_SID} password=${ORACLE_PWD} entries=30 >> $LOGFILE 2>&1
+
+if [ $? -ne 0 ]; then
+   echo "Failed. See log for details."
+   exit 1
+else
+   echo "Done."
+fi
+
+pdbDuplicateScript=$(mktemp)
+pdbOpenScript=$(mktemp)
+
+if [ -n "$PDB_NAMES" ]; then
+   count=1
+   pdbNameArray=($(echo $PDB_NAMES | sed "s/,/ /g"))
+   for pdbName in "${pdbNameArray[@]}"; do
+       if [ "$pdbName" = "pdbseed" ]; then
+          continue
+       fi
+       echo "DUPLICATE database to ${ORACLE_SID} noopen backup location '/opt/oracle/oradata/$ORACLE_SID' ;" >> $pdbDuplicateScript
+       echo "alter pluggable database ${pdbName} open;" >> $pdbOpenScript
+   count=$(($count+1))
+   done
+fi
+
+if [ "$MANUAL" -ne 0 ];then
+
+echo "PDB duplicate script: $pdbDuplicateScript"
+
+else
+
+echo -n "Opening instance unmounted ..."
+
+sqlplus -S / as sysdba <<EOF >> $LOGFILE
+set heading off;
+set pagesize 0;
+set feedback off;
+startup nomount
+EOF
+
+if [ $? -ne 0 ]; then
+   echo "Failed. See log for details."
+   exit 1
+else
+   echo "Done."
+fi
+
+echo -n "Duplicating PDBs to CDB ${ORACLE_SID} ..."
+rman auxiliary / <<EOF >> $LOGFILE
+@$pdbDuplicateScript
+EOF
+
+if [ $? -ne 0 ]; then
+   echo "Failed. See log for details."
+   exit 1
+else
+   echo "Done."
+fi
+
+echo -n "Opening CDB and PDBs ..."
+sqlplus -S / as sysdba <<EOF >> $LOGFILE
+set heading off;
+set pagesize 0;
+set feedback off;
+alter database open resetlogs;
+@$pdbOpenScript
+EOF
+
+if [ $? -ne 0 ]; then
+   echo "Failed. See log for details."
+   exit 1
+else
+   echo "Done."
+fi
+
+fi # Auto or Manual
+
+else
+
+#######################################
+## Non Incremental Merge PDB Restore ##
+#######################################
 
 SQL_SCRIPT=$(mktemp)
 
@@ -326,8 +467,9 @@ echo "Import SQL Script: $SQL_SCRIPT"
 
 fi
 
-if [ "$dbMajorRev" -eq 11 ]; then
-echo "Performing DB 11 style recover."
+if [ "$dbMajorRev" -eq 11 ] || [ "$dbMajorRev" -eq 12 -a "$dbMinorRev" -eq 2 ]; then
+echo "Performing DB RMAN recover."
+lastSeqNum=0
 
 # If DB is hot backup or image clone recover is required prior to open
 if [ "$ARCHIVELOGMODE" = "true" -o "$BKUPCOPY" -eq 1 ]; then
@@ -370,7 +512,7 @@ echo "Skipping archive log catalog, script: $RMAN_SCRIPT_CATALOG"
 
 fi
 
-if [ "$MANUAL" -eq 0 ];then
+if [ "$MANUAL" -eq 0 -a "$dbMajorRev" -eq 11 ];then
 
 lastSeqNum=`sqlplus -S / as sysdba <<EOF
 set heading off;
@@ -380,17 +522,16 @@ select * from (select trim(sequence#) from v\\$archived_log order by sequence# d
 EOF`
 lastSeqNum=$(($lastSeqNum+1))
 
-if [ "$hotBackupScn" -ne 0 ]; then
-   rmanRecoverOpt="until scn $hotBackupScn"
-else
-   rmanRecoverOpt="until sequence $lastSeqNum"
 fi
 
+if [ "$hotBackupScn" -ne 0 ]; then
+   rmanRecoverOpt="until scn $hotBackupScn"
+elif [ "$lastSeqNum" -gt 0 ]; then
+   rmanRecoverOpt="until sequence $lastSeqNum"
+elif [ "$dbMajorRev" -ne 11 -a "$dbMinorRev" -ne 1 ]; then
+   rmanRecoverOpt="until available redo"
 else
-
-# Manual recovery
-rmanRecoverOpt=""
-
+   rmanRecoverOpt=""
 fi
 
 cat <<EOF > $RMAN_SCRIPT_RECOVER
@@ -428,8 +569,8 @@ fi # Manual or Auto
 
 fi # If hot backup
 
-else # DB major rev is 12 or higher
-echo "Using DB 12 and higher style recover."
+else # DB major rev is 12.1
+echo "Using DB 12.1 style recover."
 
 RECOVER_SQL_SCRIPT=$(mktemp)
 
@@ -564,6 +705,8 @@ else
 echo "SPFILE create script: $SPFILE_SCRIPT"
 
 fi
+
+fi #### If PDB Incr Merge or Not Main Loop ####
 
 echo -n "Updating oratab ..."
 echo "$ORACLE_SID:$ORACLE_HOME:N" >> /etc/oratab
