@@ -57,6 +57,24 @@ function symLinkFiles {
 
 }
 
+function showEnvironment {
+
+    if [ -n "$IMPORT_DB" ]; then
+       if [ "$IMPORT_DB" -eq 1 ]; then
+	  importStatus="True"
+       else
+	  importStatus="False"
+       fi
+    fi
+    echo ""
+    echo "Oracle Home: $ORACLE_HOME"
+    echo "Oracle SID:  $ORACLE_SID"
+    echo "Oracle Base: $ORACLE_BASE"
+    echo "Import DB:   $importStatus"
+    echo ""
+
+}
+
 ########### SIGINT handler ############
 function _int() {
    echo "Stopping container."
@@ -147,8 +165,11 @@ fi;
 # Default for ORACLE CHARACTERSET
 export ORACLE_CHARACTERSET=${ORACLE_CHARACTERSET:-AL32UTF8}
 
+showEnvironment
+
 # Check whether database already exists
-if [ -d $ORACLE_BASE/oradata/$ORACLE_SID -o -d $ORACLE_BASE/oradata/dbconfig ]; then
+SID_UPPER=${ORACLE_SID^^}
+if [ -d $ORACLE_BASE/oradata/$ORACLE_SID -o -d $ORACLE_BASE/oradata/$SID_UPPER -o -d $ORACLE_BASE/oradata/dbconfig ]; then
 
       if [ "$IMPORT_DB" -eq 0 -o "$(grep ^$ORACLE_SID /etc/oratab | cut -d: -f1)" = "$ORACLE_SID" ];then
 
@@ -176,6 +197,18 @@ if [ -d $ORACLE_BASE/oradata/$ORACLE_SID -o -d $ORACLE_BASE/oradata/dbconfig ]; 
    fi
    
 else
+  # Check to see if import requested
+  if [ "$IMPORT_DB" -eq 1 ]; then
+     echo "ERROR: Import requested but data directory not found."
+     echo "ERROR: Check $ORACLE_BASE/oradata mount point."
+     echo ""
+     if [ "$(ps -p 1 -h -o cmd)" = "/bin/bash" ]; then
+	exit 1
+     else
+	echo "Switching to shell ..."
+        exec /bin/bash
+     fi
+  fi
   # Remove database config files, if they exist
   rm -f $ORACLE_HOME/dbs/spfile$ORACLE_SID.ora
   rm -f $ORACLE_HOME/dbs/orapw$ORACLE_SID

@@ -150,6 +150,10 @@ sed -e 's/^[a-zA-Z0-9*]*\.//' \
 
 # Create and prep directory structure
 echo "Creating directory structure"
+ORIG_SID_UPPER=${ORIG_ORACLE_SID^^}
+if [ -d /opt/oracle/oradata/$ORIG_SID_UPPER ]; then
+   ORIG_ORACLE_SID=$ORIG_SID_UPPER
+fi
 if [ ! -d /opt/oracle/oradata/$ORACLE_SID ]; then
    if [ -d /opt/oracle/oradata/$ORIG_ORACLE_SID ]; then
       mv /opt/oracle/oradata/$ORIG_ORACLE_SID /opt/oracle/oradata/$ORACLE_SID
@@ -467,7 +471,7 @@ echo "Import SQL Script: $SQL_SCRIPT"
 
 fi
 
-if [ "$dbMajorRev" -eq 11 ] || [ "$dbMajorRev" -eq 12 -a "$dbMinorRev" -eq 2 ]; then
+if [ "$dbMajorRev" -eq 11 ] || [ "$dbMajorRev" -eq 12 -a "$dbMinorRev" -eq 2 ] || [ "$dbMajorRev" -ge 18 ]; then
 echo "Performing DB RMAN recover."
 lastSeqNum=0
 

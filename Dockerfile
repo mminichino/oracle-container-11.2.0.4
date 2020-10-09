@@ -54,6 +54,7 @@ ENV ORACLE_BASE=/opt/oracle \
     CHECK_DB_FILE="checkDBStatus.sh" \
     USER_SCRIPTS_FILE="runUserScripts.sh" \
     IMPORT_DB_FILE="restoreDB.sh" \
+    DB_INSTALL_VERSION="11.2.0.4" \
     INSTALL_DB_BINARIES_FILE="installDBBinaries.sh"
 
 # Use second ENV so that variable get substituted

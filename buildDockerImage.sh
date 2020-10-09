@@ -30,6 +30,11 @@ do
   esac
 done
 
+if [ ! -f "$DOCKERFILE" ]; then
+   echo "ERROR: No dockerfile found for version $VERSION"
+   exit
+fi
+
 echo "Building image '$IMAGE_NAME' ..."
 
 # BUILD THE IMAGE (replace all environment variables)
