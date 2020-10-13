@@ -169,7 +169,7 @@ showEnvironment
 
 # Check whether database already exists
 SID_UPPER=${ORACLE_SID^^}
-if [ -d $ORACLE_BASE/oradata/$ORACLE_SID -o -d $ORACLE_BASE/oradata/$SID_UPPER -o -d $ORACLE_BASE/oradata/dbconfig ]; then
+if [ -d $ORACLE_BASE/oradata/$ORACLE_SID -o -d $ORACLE_BASE/oradata/$SID_UPPER -o -d $ORACLE_BASE/oradata/dbconfig -o -d $ORACLE_BASE/archivelog/dbconfig ]; then
 
       if [ "$IMPORT_DB" -eq 0 -o "$(grep ^$ORACLE_SID /etc/oratab | cut -d: -f1)" = "$ORACLE_SID" ];then
 

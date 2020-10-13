@@ -625,6 +625,19 @@ echo "Skipping password file."
 
 fi
 
+dbOpenScript=$(mktemp)
+
+cat <<EOF > $dbOpenScript
+alter database open resetlogs;
+EOF
+
+if [ -n "$PDB_NAMES" ]; then
+cat <<EOF >> $dbOpenScript
+alter pluggable database all open;
+alter pluggable database all save state;
+EOF
+fi
+
 if [ "$MANUAL" -eq 0 ];then
 
 # Open database
@@ -633,7 +646,7 @@ sqlplus -S / as sysdba <<EOF >> $LOGFILE
 set heading off;
 set pagesize 0;
 set feedback off;
-alter database open resetlogs;
+@$dbOpenScript
 EOF
 
 if [ $? -ne 0 ]; then
@@ -646,7 +659,7 @@ fi
 else
 
 # Manual recovery
-echo "Skipping DB Open."
+echo "Skipping DB Open. Open script: $dbOpenScript"
 
 fi
 
@@ -655,6 +668,20 @@ TEMP_SCRIPT=$(mktemp)
 cat <<EOF > $TEMP_SCRIPT
 ALTER TABLESPACE TEMP ADD TEMPFILE '/opt/oracle/oradata/$ORACLE_SID/temp01.dbf' size $TEMPSIZE reuse;
 EOF
+
+if [ -n "$PDB_NAMES" ]; then
+   count=1
+   pdbNameArray=($(echo $PDB_NAMES | sed "s/,/ /g"))
+   for pdbName in "${pdbNameArray[@]}"; do
+       if [ "$pdbName" = "pdbseed" ]; then
+          continue
+       fi
+       [ ! -d /opt/oracle/oradata/$ORACLE_SID/$pdbName ] && mkdir /opt/oracle/oradata/$ORACLE_SID/$pdbName
+       echo "alter session set container = ${pdbName} ;" >> $TEMP_SCRIPT
+       echo "ALTER TABLESPACE TEMP ADD TEMPFILE '/opt/oracle/oradata/$ORACLE_SID/$pdbName/temp01.dbf' size $TEMPSIZE reuse;" >> $TEMP_SCRIPT
+   count=$(($count+1))
+   done
+fi
 
 if [ "$MANUAL" -eq 0 ];then
 
