@@ -7,19 +7,22 @@ DATA_MOUNT=""
 ARCH_MOUNT=""
 ORACLE_PWD="password"
 VERSION=11.2.0.4
+PORT=1521
+SHM_SIZE=2192
 IMAGE_NAME="oracle/database:${VERSION}-ee"
 CONTAINER_NAME=""
+VERSION_OPT=0
 
 function err_exit {
     if [ -z "$1" ]; then
-       echo "Usage: $0 -s ORACLE_SID -d /db/mount -l /arch/mount [ -m | -v version | -n name ]"
+       echo "Usage: $0 -s ORACLE_SID -d /db/mount -l /arch/mount [ -m | -v version | -n name | -P port | -S shm_size ]"
     else
        echo "$1"
     fi
     exit 1
 }
 
-while getopts "mv:s:d:l:p:n:" opt
+while getopts "mv:s:d:l:p:n:P:S:" opt
 do
   case $opt in
     m)
@@ -41,9 +44,16 @@ do
     n)
       CONTAINER_NAME=$OPTARG
       ;;
+    P)
+      PORT=$OPTARG
+      ;;
+    S)
+      SHM_SIZE=$OPTARG
+      ;;
     v)
       VERSION=$OPTARG
       IMAGE_NAME="oracle/database:${VERSION}-ee"
+      VERSION_OPT=1
       ;;
     \?)
       err_exit
@@ -61,9 +71,24 @@ fi
 [ $(stat -c "%m" "$DATA_MOUNT") = "/" ] && err_exit "$DATA_MOUNT is not a mount point."
 [ $(stat -c "%m" "$ARCH_MOUNT") = "/" ] && err_exit "$ARCH_MOUNT is not a mount point."
 
+if [ -f $ARCH_MOUNT/dbconfig/*.dbconfig ]; then
+   . $ARCH_MOUNT/dbconfig/*.dbconfig
+   if [ -n "$DBVERSION" -a "$VERSION_OPT" -eq 0 ]; then
+      echo "Found DB $DBVERSION configuration on $ARCH_MOUNT ..."
+      VERSION=$(echo $DBVERSION | sed -n -e 's/^\([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*\).*$/\1/p')
+      IMAGE_NAME="oracle/database:${VERSION}-ee"
+   elif [ "$VERSION_OPT" -eq 1 ]; then
+	echo "WARNING: command line version $VERSION overriding config version ..."
+   fi
+fi
+
+echo "Running:"
+echo "VERSION: $VERSION"
+echo "IMAGE  : $IMAGE_NAME"
+
 docker run --privileged $OPTS --name $CONTAINER_NAME \
-	--shm-size=2192m \
-	-p 1521:1521 -p 5500:5500 \
+	--shm-size=${SHM_SIZE}m \
+	-p ${PORT}:1521 \
 	-e ORACLE_SID=${ORACLE_SID} \
 	-e ORACLE_PWD=${ORACLE_PWD} \
 	-e ORACLE_EDITION=EE \
