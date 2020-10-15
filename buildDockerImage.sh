@@ -1,7 +1,7 @@
 #!/bin/sh
 VERSION=11.2.0.4
 IMAGE_NAME="oracle/database:${VERSION}-ee"
-DOCKERFILE="Dockerfile"
+DOCKERFILE="Dockerfile.${VERSION}"
 
 function err_exit {
    if [ -n "$1" ]; then
