@@ -1,7 +1,7 @@
 # oracle-container-automation
-Create a Container with a Database
+Create a Container with a Database or Database Copy
 
-This is a docker toolset to create containers that will run either a new Oracle Database instance, import a snapshot of a running instance (in hot backup mode), or create a new instnace from a backup copy. It is based on the Oracle docker-images-master project, which is provided under UPL, therefore this is provided under UPL. This is only a reference sample. It is provided for informational and self-help purposes only. This is provided in good faith, however there is no representation or warranty of any kind, express or implied, regarding the accuracy, adequacy, validity, reliability, availability or completeness of anything contained herein. Under no circumstance shall there be any liability to you for any loss or damage of any kind incurred as a result of the use of these utilities.
+This is a docker database toolset to create containers that will run either a new Oracle Database instance, import a snapshot of a running instance (in hot backup mode), or create a new instnace from a backup copy. Some components are based on utilities in the Oracle docker-images-master project. This is provided under UPL. This is only a reference sample. It is provided for informational and self-help purposes only. This is provided in good faith, however there is no representation or warranty of any kind, express or implied, regarding the accuracy, adequacy, validity, reliability, availability or completeness of anything contained herein. Under no circumstance shall there be any liability to you for any loss or damage of any kind incurred as a result of the use of these utilities.
 
 It has been tested with Database versions 11.2.0.4, 12.1.0.2, 12.2.0.1, 18c and 19c.
 
