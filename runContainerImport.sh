@@ -76,6 +76,14 @@ if [ -f $ARCH_MOUNT/dbconfig/*.dbconfig ]; then
    if [ -n "$DBVERSION" -a "$VERSION_OPT" -eq 0 ]; then
       echo "Found DB $DBVERSION configuration on $ARCH_MOUNT ..."
       VERSION=$(echo $DBVERSION | sed -n -e 's/^\([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*\).*$/\1/p')
+      case $VERSION in
+          "18.0.0.0")
+	    VERSION="18.3.0"
+	    ;;
+	  "19.0.0.0")
+	    VERSION="19.3.0"
+	    ;;
+      esac
       IMAGE_NAME="oracle/database:${VERSION}-ee"
    elif [ "$VERSION_OPT" -eq 1 ]; then
 	echo "WARNING: command line version $VERSION overriding config version ..."

@@ -146,6 +146,9 @@ sed -e 's/^[a-zA-Z0-9*]*\.//' \
     -e '/remote_login_passwordfile/d' \
     -e '/db_recovery_file_dest_size/d' \
     -e '/local_listener/d' \
+    -e '/cluster_database/d' \
+    -e '/instance_number/d' \
+    -e '/thread/d' \
     -e '/db_create_file_dest/d' $backupInitFile > $ORACLE_HOME/dbs/init${ORACLE_SID}.ora
 
 # Create and prep directory structure
@@ -268,6 +271,10 @@ sed -e 's/^[a-zA-Z0-9*]*\.//' \
     -e '/remote_login_passwordfile/d' \
     -e '/db_recovery_file_dest_size/d' \
     -e '/memory_target/d' \
+    -e '/local_listener/d' \
+    -e '/cluster_database/d' \
+    -e '/instance_number/d' \
+    -e '/thread/d' \
     -e '/db_create_file_dest/d' $ORACLE_HOME/dbs/init${ORACLE_SID}.ora > $ORACLE_HOME/dbs/init${AUX_SID}.ora
 
 # Add updated init parameters
